@@ -4,6 +4,70 @@ node {
     stage('SCM') {
         checkout scm
     }
+    stage('Build Branch') {
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: "*/${env.BRANCH_NAME}"]],
+          userRemoteConfigs: [[url: 'https://github.com/eramirez-cs/cloverCodeCoverage']]
+        ])
+        withEnv(['PATH+EXTRA=/usr/sbin:/usr/bin:/sbin:/bin']) {
+            // echo sh(script: 'env|sort', returnStdout: true)
+            if (env.CHANGE_ID) {
+                try {
+                    // Checkout to develop and run mvn test
+                    def output = sh(
+                        script: "${mvn}/bin/mvn --log-file commandResult clean install",
+                        returnStatus: true )
+                    def result = readFile('commandResult').trim()
+                    if(result.contains('There are test failures')) {
+                        currentBuild.result = 'NOT_BUILT'
+                        echo 'UNIT TEST FAILURE'
+                        pullRequest.review('REQUEST_CHANGES', 'The build has failed. Some of your unit tests are failing up.')
+                        pullRequest.createStatus(status: 'failure',
+                                                 context: 'continuous-integration/jenkins/pr-merge',
+                                                 description: 'Unit Test has failed.',
+                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}/clover-report/dashboard.html")
+                        pullRequest.addLabel('JenkinsReviewFailed')
+                        pullRequest.removeLabel('JenkinsReviewPassed')
+                        return
+                    }
+                    if(result.contains('did not meet target')) {
+                        String mvnResult = readFile ('commandResult')
+                        String[] linesT = mvnResult.split('\n')
+                        def foundTargetLine = linesT.find { line-> line =~ /Checking for coverage of/ }
+                        def targetMatch = (foundTargetLine =~ /[0-9]+[.][0-9]+/ )
+
+                        echo "TARGET: ${targetMatch[0]}"
+                        currentBuild.result = 'NOT_BUILT'
+                        echo 'BUILD FAILURE'
+                        pullRequest.review('REQUEST_CHANGES',"Error on the build. Coverage of did not meet target ${targetMatch[0]}%")
+                        pullRequest.createStatus(status: 'failure',
+                                                 context: 'continuous-integration/jenkins/pr-merge',
+                                                 description: ' Coverage of actual brach did not meet target.',
+                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}/clover-report/dashboard.html")
+                        pullRequest.addLabel('JenkinsReviewFailed')
+                        pullRequest.removeLabel('JenkinsReviewPassed')
+                        return
+                    }
+                }catch (all) {
+                    def error = "${all}"
+                    echo "Error ${all}"
+                    if (error.contains('hudson.AbortException: script returned exit code 1')) {
+                        echo 'Exception detected: test errors'
+                        pullRequest.review('REQUEST_CHANGES', 'The build has failed.')
+                    } else {
+                        if(error.contains('Label does not exist')){
+                            echo 'Replacing Labels'
+                            return
+                        } else{
+                            echo 'Exception detected: error on the build'
+                            pullRequest.review('REQUEST_CHANGES', 'Error on the build')
+                        }
+                    }
+                }
+            }
+        }
+    }
     stage('Master Coverage') {
         if (env.CHANGE_ID) {
             checkout([
@@ -26,11 +90,14 @@ node {
                 def foundPassedLine = lines.find { line-> line =~ /div class="barPositive contribBarPositive "/ }
                 def passedMatch = (foundPassedLine =~ /[0-9]+[.][0-9]+/ )
                 masterCoverage = passedMatch[0] as Float
-
-                println ("Master Coverage: ${masterCoverage}")
             } catch (all) {
                 def error = "${all}"
                 echo "Error ${all}"
+                echo 'Exception detected: error on the build'
+                pullRequest.review('REQUEST_CHANGES', 'Error on the build')
+                currentBuild.result = 'NOT_BUILT'
+                echo 'BUILD FAILURE'
+                return
             }
         }
     }
@@ -46,39 +113,8 @@ node {
                 try {
                     // Checkout to develop and run mvn test
                     def output = sh(
-                        script: "${mvn}/bin/mvn --log-file commandResult clean install clover:setup test clover:aggregate clover:clover",
+                        script: "${mvn}/bin/mvn --log-file commandResult clean clover:setup test clover:aggregate clover:clover",
                         returnStatus: true )
-                    def result = readFile('commandResult').trim()
-                    echo "RESULTS: ${result}"
-
-                    if(result.contains('There are test failures')) {
-                        currentBuild.result = 'NOT_BUILT'
-                        echo 'UNIT TEST FAILURE'
-                        pullRequest.review('REQUEST_CHANGES', 'The build has failed. Some of your unit tests are failing up.')
-                        pullRequest.createStatus(status: 'failure',
-                                                 context: 'continuous-integration/jenkins/pr-merge',
-                                                 description: 'Unit Test has failed.',
-                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}/clover-report/dashboard.html")
-                        pullRequest.labels = ['JenkinsReviewPassed', 'JenkinsReviewFailed']
-                        return
-                    }
-                    if(result.contains('did not meet target')) {
-                        String mvnResult = readFile ('commandResult')
-                        String[] linesT = mvnResult.split('\n')
-                        def foundTargetLine = linesT.find { line-> line =~ /Checking for coverage of/ }
-                        def targetMatch = (foundTargetLine =~ /[0-9]+[.][0-9]+/ )
-
-                        echo "TARGET: ${targetMatch[0]}"
-                        currentBuild.result = 'NOT_BUILT'
-                        echo 'BUILD FAILURE'
-                        pullRequest.review('REQUEST_CHANGES',"Error on the build. Coverage of did not meet target ${targetMatch[0]}%")
-                        pullRequest.createStatus(status: 'failure',
-                                                 context: 'continuous-integration/jenkins/pr-merge',
-                                                 description: ' Coverage of actual brach did not meet target.',
-                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}/clover-report/dashboard.html")
-                        pullRequest.labels = ['JenkinsReviewPassed', 'JenkinsReviewFailed']
-                        return
-                    }
                     step([
                        $class: 'CloverPublisher',
                        cloverReportDir: 'target/site',
@@ -111,7 +147,8 @@ node {
                                                      context: 'continuous-integration/jenkins/pr-merge',
                                                      description: 'All tests are passing.',
                                                      targetUrl: "${env.JOB_URL}/env.BUILD_ID/clover-report/dashboard.html")
-                            pullRequest.labels = ['JenkinsReviewPassed', 'JenkinsReviewFailed']
+                            pullRequest.addLabel('JenkinsReviewPassed')
+                            pullRequest.removeLabel('JenkinsReviewFailed')
                             return
                         } catch (ex) {
                             echo "Fail trying to add Labels ${ex}"
@@ -126,7 +163,8 @@ node {
                                                      context: 'continuous-integration/jenkins/pr-merge',
                                                      description: 'The execution fails, branch coverage is less than master coverage',
                                                      targetUrl: "${env.JOB_URL}/${env.BUILD_ID}/clover-report/dashboard.html")
-                            pullRequest.labels = ['JenkinsReviewFailed', 'JenkinsReviewPassed']
+                            pullRequest.addLabel('JenkinsReviewFailed')
+                            pullRequest.removeLabel('JenkinsReviewPassed')
                             return
                         } catch (ex) {
                             echo "Fail trying to add Labels ${ex}"
