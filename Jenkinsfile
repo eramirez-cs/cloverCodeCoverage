@@ -24,11 +24,11 @@ node {
                         skipRemainingStages = true
                         currentBuild.result = 'NOT_BUILT'
                         echo 'UNIT TEST FAILURE'
-                        pullRequest.review('REQUEST_CHANGES', 'The build has failed. Some of your unit tests are failing up.')
+                        pullRequest.review('REQUEST_CHANGES', 'The build has failed. Some of your unit tests are failing.')
                         pullRequest.createStatus(status: 'failure',
                                                  context: 'continuous-integration/jenkins/pr-merge',
                                                  description: 'Unit Test has failed.',
-                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}/clover-report/dashboard.html")
+                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}")
                         pullRequest.addLabel('JenkinsReviewFailed')
                         pullRequest.removeLabel('JenkinsReviewPassed')
                         return
@@ -43,11 +43,11 @@ node {
                         echo "TARGET: ${targetMatch[0]}"
                         currentBuild.result = 'NOT_BUILT'
                         echo 'BUILD FAILURE'
-                        pullRequest.review('REQUEST_CHANGES',"Error on the build. Coverage of did not meet target ${targetMatch[0]}%")
+                        pullRequest.review('REQUEST_CHANGES',"Error on the build. Coverage did not meet target ${targetMatch[0]}%")
                         pullRequest.createStatus(status: 'failure',
                                                  context: 'continuous-integration/jenkins/pr-merge',
                                                  description: ' Coverage of actual brach did not meet target.',
-                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}/clover-report/dashboard.html")
+                                                 targetUrl: "${env.JOB_URL}/${env.BUILD_ID}")
                         pullRequest.addLabel('JenkinsReviewFailed')
                         pullRequest.removeLabel('JenkinsReviewPassed')
                         return
@@ -149,7 +149,7 @@ node {
                             try {
                                 currentBuild.result = 'SUCCESS'
                                 echo 'BUILD SUCCESS'
-                                pullRequest.review('APPROVE', 'The execution, coverage and unit test failure verification passed successfully.')
+                                pullRequest.review('APPROVE', 'The execution, Coverage and Unit Test, verification passed successfully.')
                                 pullRequest.createStatus(status: 'success',
                                                          context: 'continuous-integration/jenkins/pr-merge',
                                                          description: 'All tests are passing.',
@@ -165,7 +165,7 @@ node {
                             try {
                                 currentBuild.result = 'NOT_BUILT'
                                 echo 'BUILD FAILURE'
-                                pullRequest.review('REQUEST_CHANGES', "Code Coverage has decrease; from ${masterCoverage}% to ${branchCoverage}%")
+                                pullRequest.review('REQUEST_CHANGES', "Code Coverage has decreased; from ${masterCoverage}% to ${branchCoverage}%")
                                 pullRequest.createStatus(status: 'failure',
                                                          context: 'continuous-integration/jenkins/pr-merge',
                                                          description: 'The execution fails, branch coverage is less than master coverage',
